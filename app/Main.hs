@@ -74,7 +74,6 @@ main = do
           , after = aftertm
           , showHelp = False
           , showSubreddit = False
-          , showPostPreview = False
           , keyConfig = kc
           , dispatcher = d
           , bchan = bchan
@@ -108,13 +107,15 @@ main = do
   void $ customMain initialVty buildVty (Just bchan) app initialState
 
 drawUi :: AppState -> [Widget Name]
-drawUi AppState{..} = [keybindingHelp, postPreview, subredditList, postList]
+drawUi AppState{..} = [keybindingHelp, subredditList, postList]
  where
   subredditList =
     if showSubreddit
       then
-        borderWithLabel (txt "Subreddits") . hLimit 30 . withVScrollBars OnRight $
-          renderList renderSubreddit showSubreddit subreddits
+        borderWithLabel (txt "Subreddits")
+          . hLimit 30
+          . withVScrollBars OnRight
+          $ renderList renderSubreddit showSubreddit subreddits
       else emptyWidget
 
   renderSubreddit _ Subreddit{..} = txt $ "/r/" <> displayName
@@ -127,40 +128,23 @@ drawUi AppState{..} = [keybindingHelp, postPreview, subredditList, postList]
       , txt ")"
       ]
 
-  postPreview =
-    if showPostPreview
-      then do
-        maybe emptyWidget (renderPostPreview . snd) (listSelectedElement posts)
-      else emptyWidget
-
-  renderPostPreview Post{..} =
-    if not (T.null selftext)
-      then
-        centerLayer . borderWithLabel (txt title) . vLimitPercent 90 . hLimit 90 $
-          txtWrap selftext
-      else emptyWidget
-
   topBar =
     (withAttr (attrName "title") $ txt "Reddit")
       <+> ( padLeft Max . padRight (Pad 1) . hBox $
-              [ padRight (Pad 1) $ if showPostPreview then txt "P" else emptyWidget
-              , maybe emptyWidget renderUser user
+              [ maybe emptyWidget renderUser user
               ]
           )
 
   postList =
     joinBorders . borderWithLabel (txt "Posts") $
       topBar
-        <=> ( withVScrollBars OnRight $
-                renderList renderPost (not showSubreddit) posts
-            )
+        <=> (withVScrollBars OnRight $ renderList renderPost (not showSubreddit) posts)
 
   renderPost _ Post{..} =
     hBox
       [ txt "("
       , attrName "ups" `withAttr` str (printf "%5d" ups)
       , txt $ ") "
-      , if not (T.null selftext) then txt "[+] " else txt "    "
       , txt . fst . T.breakOn "\n" $ title
       , attrName "subreddit" `withAttr` txt (" /r/" <> subreddit)
       ]
@@ -274,7 +258,7 @@ defaultBindings =
   , (ShowSubredditEvent, [bind 's'])
   , (RefreshEvent, [bind 'r'])
   , (OpenPostUrlEvent, [bind 'o'])
-  , (ShowPostPreviewEvent, [bind 'p'])
+  , (OpenPostCommentEvent, [bind 'c'])
   ]
 
 allKeyEvents :: KeyEvents KeyEvent
@@ -285,7 +269,7 @@ allKeyEvents =
     , ("subreddit", ShowSubredditEvent)
     , ("refresh", RefreshEvent)
     , ("open", OpenPostUrlEvent)
-    , ("preview", ShowPostPreviewEvent)
+    , ("comments", OpenPostCommentEvent)
     ]
 
 handlers :: [KeyEventHandler KeyEvent (EventM Name AppState)]
@@ -321,7 +305,14 @@ handlers =
               Nothing -> return ()
       )
   , onEvent
-      ShowPostPreviewEvent
-      "Show post preview"
-      (modify $ \st@AppState{..} -> st{showPostPreview = not showPostPreview})
+      OpenPostCommentEvent
+      "Open post comments in browser"
+      ( do
+          AppState{..} <- get
+          when (not showSubreddit) $ do
+            case listSelectedElement posts of
+              Just (_, Post{..}) -> do
+                liftIO $ openInBrowser ("https://old.reddit.com" <> permalink)
+              Nothing -> return ()
+      )
   ]

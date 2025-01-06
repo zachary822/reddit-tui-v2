@@ -66,6 +66,7 @@ data Post = Post
   , downs :: !Integer
   , selftext :: !Text
   , url :: !Text
+  , permalink :: !Text
   , created :: !POSIXTime
   }
   deriving (Generic, Show, Eq)
@@ -88,6 +89,7 @@ instance FromJSON Post where
       <*> d .: "downs"
       <*> d .: "selftext"
       <*> d .: "url"
+      <*> d .: "permalink"
       <*> d .: "created_utc"
 
 data Subreddit = Subreddit

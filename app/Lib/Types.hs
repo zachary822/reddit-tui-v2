@@ -18,7 +18,6 @@ data AppState = AppState
   , after :: !(TMVar (Maybe Text))
   , showHelp :: !Bool
   , showSubreddit :: !Bool
-  , showPostPreview :: !Bool
   , keyConfig :: !(KeyConfig KeyEvent)
   , dispatcher :: !(KeyDispatcher KeyEvent (EventM Name AppState))
   , bchan :: !(BChan CustomEvent)
@@ -32,7 +31,7 @@ data KeyEvent
   | ShowSubredditEvent
   | RefreshEvent
   | OpenPostUrlEvent
-  | ShowPostPreviewEvent
+  | OpenPostCommentEvent
   deriving (Show, Eq, Ord)
 data CustomEvent
   = GetPosts
