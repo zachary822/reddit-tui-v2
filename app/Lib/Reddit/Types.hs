@@ -3,6 +3,7 @@
 
 module Lib.Reddit.Types where
 
+import Control.Applicative
 import Control.Monad
 import Data.Aeson
 import Data.Text (Text)
@@ -48,6 +49,12 @@ data Listing a = Listing
   }
   deriving (Generic, Show, Eq)
 
+instance Semigroup (Listing a) where
+  Listing c b a <> Listing c' b' a' = Listing (c <> c') (b <> b') (a <> a')
+
+instance Monoid (Listing a) where
+  mempty = Listing mempty mempty mempty
+
 instance (FromJSON a) => FromJSON (Listing a) where
   parseJSON = withObject "Listing" $ \o -> do
     k :: Text <- o .: "kind"
@@ -58,13 +65,13 @@ instance (FromJSON a) => FromJSON (Listing a) where
     Listing <$> d .: "children" <*> d .:? "before" <*> d .: "after"
 
 data Post = Post
-  { postId :: !String
+  { postId :: !Text
   , title :: !Text
   , subreddit :: !Text
   , author :: !Text
-  , ups :: !Integer
-  , downs :: !Integer
+  , score :: !Integer
   , selftext :: !Text
+  , numComments :: !Integer
   , url :: !Text
   , permalink :: !Text
   , created :: !POSIXTime
@@ -85,9 +92,9 @@ instance FromJSON Post where
       <*> d .: "title"
       <*> d .: "subreddit"
       <*> d .: "author"
-      <*> d .: "ups"
-      <*> d .: "downs"
+      <*> d .: "score"
       <*> d .: "selftext"
+      <*> d .: "num_comments"
       <*> d .: "url"
       <*> d .: "permalink"
       <*> d .: "created_utc"
@@ -169,3 +176,60 @@ instance FromJSON User where
       <*> o .: "link_karma"
       <*> o .: "comment_karma"
       <*> o .: "created_utc"
+
+data Comment = Comment
+  { commentId :: !Text
+  , author :: !Text
+  , score :: !Integer
+  , body :: !Text
+  , depth :: !Integer
+  , replies :: !(Listing CommentOrMore)
+  }
+  deriving (Generic, Show, Eq)
+
+instance Ord Comment where
+  Comment{commentId} `compare` Comment{commentId = commentId'} = commentId `compare` commentId'
+
+instance FromJSON Comment where
+  parseJSON = withObject "Comment" $ \o -> do
+    k :: Text <- o .: "kind"
+    guard (k == "t1")
+    d <- o .: "data"
+
+    Comment
+      <$> d .: "id"
+      <*> d .: "author"
+      <*> d .: "score"
+      <*> d .: "body"
+      <*> d .: "depth"
+      <*> ( d .: "replies"
+              <|> return mempty
+          )
+
+data More = More
+  { moreId :: !Text
+  , depth :: !Integer
+  , children :: ![Text]
+  }
+  deriving (Generic, Show, Eq)
+
+instance Ord More where
+  More{moreId} `compare` More{moreId = moreId'} = moreId `compare` moreId'
+
+instance FromJSON More where
+  parseJSON = withObject "More" $ \o -> do
+    k :: Text <- o .: "kind"
+    guard (k == "more")
+    d <- o .: "data"
+    More
+      <$> d .: "id"
+      <*> d .: "depth"
+      <*> d .: "children"
+
+data CommentOrMore
+  = Cmt Comment
+  | Mr More
+  deriving (Generic, Show, Eq, Ord)
+
+instance FromJSON CommentOrMore where
+  parseJSON = genericParseJSON defaultOptions{sumEncoding = UntaggedValue}

@@ -38,7 +38,7 @@ getToken p oauth@Oauth{..} =
           let mtime = modificationTimeHiRes stat
           cur <- getPOSIXTime
 
-          if mtime + secondsToNominalDiffTime (fromIntegral expiresIn) < cur
+          if mtime + secondsToNominalDiffTime (fromIntegral expiresIn - 3600) < cur
             then
               return token
             else do
