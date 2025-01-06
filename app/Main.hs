@@ -8,19 +8,29 @@ import Brick.BChan
 import Brick.Keybindings
 import Brick.Widgets.Border
 import Brick.Widgets.Center
+import Brick.Widgets.Edit (
+  applyEdit,
+  editor,
+  getEditContents,
+  handleEditorEvent,
+  renderEditor,
+ )
 import Brick.Widgets.List
 import Control.Applicative
 import Control.Concurrent
 import Control.Concurrent.STM
+import Control.Exception (catch)
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.Text qualified as T
 import Data.Text.Encoding (encodeUtf8)
+import Data.Text.Zipper
 import Data.Vector qualified as Vec
 import Data.Vector.Algorithms.Merge qualified as VA
 import Graphics.Vty (
   Event (..),
   Key (..),
+  Modifier (..),
   setWindowTitle,
   userConfig,
  )
@@ -31,6 +41,7 @@ import Lib.Reddit.Oauth
 import Lib.Reddit.Types
 import Lib.Types
 import Lib.Utils (openInBrowser)
+import Network.HTTP.Simple (JSONException)
 import System.Directory
 import System.Exit (exitFailure)
 import System.FilePath
@@ -69,6 +80,8 @@ main = do
           { accessToken = accessToken
           , user = Nothing
           , posts = list PostsName mempty 1
+          , focusSearch = False
+          , searchSubreddit = editor SubredditSearchName (Just 1) ""
           , subreddits = list SubredditsName defaultSubreddits 1
           , currentSubreddit = Vec.head defaultSubreddits
           , after = aftertm
@@ -96,7 +109,7 @@ main = do
                 , (attrName "subreddit", defAttr `withForeColor` yellow)
                 , (attrName "title", defAttr `withStyle` bold)
                 ]
-          , appChooseCursor = neverShowCursor
+          , appChooseCursor = showFirstCursor
           }
 
   let buildVty = do
@@ -114,11 +127,15 @@ drawUi AppState{..} = [keybindingHelp, subredditList, postList]
       then
         borderWithLabel (txt "Subreddits")
           . hLimit 30
-          . withVScrollBars OnRight
-          $ renderList renderSubreddit showSubreddit subreddits
+          $ renderSearch
+            <=> ( withVScrollBars OnRight $
+                    renderList renderSubreddit showSubreddit subreddits
+                )
       else emptyWidget
 
   renderSubreddit _ Subreddit{..} = txt $ "/r/" <> displayName
+
+  renderSearch = renderEditor (txt . T.unlines) focusSearch searchSubreddit
 
   renderUser User{..} = do
     hBox
@@ -157,35 +174,62 @@ drawUi AppState{..} = [keybindingHelp, subredditList, postList]
       else emptyWidget
 
 appEvent :: BrickEvent Name CustomEvent -> EventM Name AppState ()
-appEvent (VtyEvent e@(EvKey k mods)) = do
+appEvent be@(VtyEvent e@(EvKey k mods)) = do
   AppState{..} <- get
 
-  h <- handleKey dispatcher k mods
+  when (not showSubreddit) $ do
+    nl <- nestEventM' posts (handleListEventVi handleListEvent e)
+    let total = Vec.length . listElements $ nl
+    let isLast = case listSelected nl of
+          Nothing -> True
+          Just n -> n == total - 1
+    modify $ \st -> st{posts = nl}
+    when
+      isLast
+      (void . liftIO $ writeBChanNonBlocking bchan GetMorePosts)
 
-  unless h $ do
-    when (not showSubreddit) $ do
-      nl <- nestEventM' posts (handleListEventVi handleListEvent e)
-      let total = Vec.length . listElements $ nl
-      let isLast = case listSelected nl of
-            Nothing -> True
-            Just n -> n == total - 1
-      modify $ \st -> st{posts = nl}
-      when
-        isLast
-        (void . liftIO $ writeBChanNonBlocking bchan GetMorePosts)
+  when showSubreddit $ do
+    if focusSearch
+      then do
+        ne <- nestEventM' searchSubreddit (handleEditorEvent be)
+        modify $ \st -> st{searchSubreddit = ne}
+        case e of
+          EvKey KEnter [] -> do
+            let sr =
+                  Subreddit "" "" $
+                    "/r/" <> (T.strip . T.unlines) (getEditContents searchSubreddit) <> "/"
+            modify $ \st@AppState{searchSubreddit = ne'} ->
+              st
+                { currentSubreddit = sr
+                , focusSearch = False
+                , showSubreddit = False
+                , searchSubreddit = applyEdit clearZipper ne'
+                }
+            liftIO $ writeBChan bchan GetPosts
+          _ -> return ()
+      else do
+        nl <- nestEventM' subreddits (handleListEventVi handleListEvent e)
+        modify $ \st -> st{subreddits = nl}
+        case e of
+          EvKey KEnter [] -> do
+            case listSelectedElement nl of
+              Just (_, sr) -> do
+                modify $ \st -> st{currentSubreddit = sr, showSubreddit = False}
+                liftIO $ writeBChan bchan GetPosts
+              Nothing -> return ()
+          _ -> return ()
+    case e of
+      EvKey (KChar '/') [] -> do
+        modify $ \st -> st{focusSearch = True}
+      EvKey (KEsc) [] -> do
+        when focusSearch $ modify $ \st -> st{focusSearch = False}
+      _ -> return ()
 
-    when showSubreddit $ do
-      nl <- nestEventM' subreddits (handleListEventVi handleListEvent e)
-      modify $ \st -> st{subreddits = nl}
-
-      case e of
-        EvKey KEnter [] -> do
-          case listSelectedElement nl of
-            Just (_, sr) -> do
-              modify $ \st -> st{currentSubreddit = sr, showSubreddit = False}
-              liftIO $ writeBChan bchan GetPosts
-            Nothing -> return ()
-        _ -> return ()
+  case e of
+    EvKey (KChar 'c') [MCtrl] -> halt
+    _ -> return ()
+  unless focusSearch $ do
+    void $ handleKey dispatcher k mods
 appEvent (AppEvent GetPosts) = do
   AppState{currentSubreddit = Subreddit{..}, ..} <- get
   void . liftIO . forkIO $ do
@@ -195,6 +239,7 @@ appEvent (AppEvent GetPosts) = do
         accessToken
         url
         [("limit", Just "100")]
+        `catch` \(_ :: JSONException) -> return Listing{before = Nothing, after = Nothing, children = mempty}
     writeBChan bchan $ Posts children
     atomically $ putTMVar after after''
 appEvent (AppEvent (Posts children)) = do

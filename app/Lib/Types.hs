@@ -3,6 +3,7 @@ module Lib.Types where
 import Brick
 import Brick.BChan (BChan)
 import Brick.Keybindings
+import Brick.Widgets.Edit (Editor)
 import Brick.Widgets.List
 import Control.Concurrent.STM
 import Data.Text (Text)
@@ -13,6 +14,8 @@ data AppState = AppState
   { accessToken :: !Text
   , user :: !(Maybe User)
   , posts :: !(List Name Post)
+  , focusSearch :: !Bool
+  , searchSubreddit :: !(Editor Text Name)
   , subreddits :: !(List Name Subreddit)
   , currentSubreddit :: !Subreddit
   , after :: !(TMVar (Maybe Text))
@@ -23,7 +26,11 @@ data AppState = AppState
   , bchan :: !(BChan CustomEvent)
   }
 
-data Name = PostsName | SubredditsName deriving (Show, Eq, Ord)
+data Name
+  = PostsName
+  | SubredditsName
+  | SubredditSearchName
+  deriving (Show, Eq, Ord)
 
 data KeyEvent
   = QuitEvent

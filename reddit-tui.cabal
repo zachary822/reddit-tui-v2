@@ -89,6 +89,7 @@ executable reddit-tui
                       filepath,
                       random,
                       text,
+                      text-zipper,
                       bytestring,
                       memory,
                       unix,
