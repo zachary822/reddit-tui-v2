@@ -1,3 +1,5 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module Lib.Types where
 
 import Brick
@@ -9,25 +11,26 @@ import Control.Concurrent.STM
 import Data.Text (Text)
 import Data.Time (TimeZone)
 import Data.Vector (Vector)
+import Lens.Micro.Platform
 import Lib.Reddit.Types
 
 data AppState = AppState
-  { accessToken :: !Text
-  , user :: !(Maybe User)
-  , posts :: !(List Name Post)
-  , focusSubredditSearch :: !Bool
-  , searchSubreddit :: !(Editor Text Name)
-  , subreddits :: !(List Name Subreddit)
-  , currentSubreddit :: !Subreddit
-  , postComments :: !(Vector CommentOrMore)
-  , after :: !(TMVar (Maybe Text))
-  , showHelp :: !Bool
-  , showSubreddit :: !Bool
-  , showPost :: !Bool
-  , keyConfig :: !(KeyConfig KeyEvent)
-  , dispatcher :: !(KeyDispatcher KeyEvent (EventM Name AppState))
-  , bchan :: !(BChan CustomEvent)
-  , tz :: !TimeZone
+  { _accessToken :: !Text
+  , _user :: !(Maybe User)
+  , _posts :: !(List Name Post)
+  , _focusSubredditSearch :: !Bool
+  , _searchSubreddit :: !(Editor Text Name)
+  , _subreddits :: !(List Name Subreddit)
+  , _currentSubreddit :: !Subreddit
+  , _postComments :: !(Vector CommentOrMore)
+  , _after :: !(TMVar (Maybe Text))
+  , _showHelp :: !Bool
+  , _showSubreddit :: !Bool
+  , _showPost :: !Bool
+  , _keyConfig :: !(KeyConfig KeyEvent)
+  , _dispatcher :: !(KeyDispatcher KeyEvent (EventM Name AppState))
+  , _bchan :: !(BChan CustomEvent)
+  , _tz :: !TimeZone
   }
 
 data Name
@@ -58,3 +61,5 @@ data CustomEvent
   | GetPostComment !Text
   | PostComments !(Vector CommentOrMore)
   deriving (Show, Eq, Ord)
+
+makeLenses ''AppState

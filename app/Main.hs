@@ -39,6 +39,7 @@ import Graphics.Vty (
  )
 import Graphics.Vty.Attributes
 import Graphics.Vty.Platform.Unix (mkVty)
+import Lens.Micro.Platform
 import Lib.Reddit.Api
 import Lib.Reddit.Oauth
 import Lib.Reddit.Types
@@ -66,9 +67,9 @@ main = do
               ["submit", "save", "read", "history", "subscribe", "mysubreddits", "identity"]
           }
 
-  Token{..} <- getToken tokenPath oauth
+  Token{accessToken = atoken} <- getToken tokenPath oauth
 
-  bchan <- newBChan 10
+  _bchan <- newBChan 10
 
   let kc = newKeyConfig allKeyEvents defaultBindings []
 
@@ -76,27 +77,27 @@ main = do
     Right d -> return d
     Left _ -> exitFailure
 
-  tz <- getCurrentTimeZone
+  _tz <- getCurrentTimeZone
   aftertm <- newTMVarIO Nothing
 
   let initialState =
         AppState
-          { accessToken = accessToken
-          , user = Nothing
-          , posts = list PostsName mempty 1
-          , focusSubredditSearch = False
-          , searchSubreddit = editor SubredditSearchName (Just 1) ""
-          , subreddits = list SubredditsName defaultSubreddits 1
-          , currentSubreddit = Vec.head defaultSubreddits
-          , postComments = mempty
-          , after = aftertm
-          , showHelp = False
-          , showSubreddit = False
-          , showPost = False
-          , keyConfig = kc
-          , dispatcher = d
-          , bchan = bchan
-          , tz = tz
+          { _accessToken = atoken
+          , _user = Nothing
+          , _posts = list PostsName mempty 1
+          , _focusSubredditSearch = False
+          , _searchSubreddit = editor SubredditSearchName (Just 1) ""
+          , _subreddits = list SubredditsName defaultSubreddits 1
+          , _currentSubreddit = Vec.head defaultSubreddits
+          , _postComments = mempty
+          , _after = aftertm
+          , _showHelp = False
+          , _showSubreddit = False
+          , _showPost = False
+          , _keyConfig = kc
+          , _dispatcher = d
+          , _bchan = _bchan
+          , _tz = _tz
           }
 
   let app =
@@ -105,9 +106,9 @@ main = do
           , appHandleEvent = appEvent
           , appStartEvent = do
               liftIO $ do
-                writeBChan bchan GetPosts
-                writeBChan bchan GetSubreddits
-                writeBChan bchan GetUserData
+                writeBChan _bchan GetPosts
+                writeBChan _bchan GetSubreddits
+                writeBChan _bchan GetUserData
           , appAttrMap = \_ ->
               attrMap
                 defAttr
@@ -126,30 +127,30 @@ main = do
         setWindowTitle v "Reddit"
         return v
   initialVty <- buildVty
-  void $ customMain initialVty buildVty (Just bchan) app initialState
+  void $ customMain initialVty buildVty (Just _bchan) app initialState
 
 drawUi :: AppState -> [Widget Name]
 drawUi AppState{..} = [keybindingHelp, subredditList, postPreview, postList]
  where
   subredditList =
-    if showSubreddit
+    if _showSubreddit
       then
         borderWithLabel (txt "Subreddits")
           . hLimit 30
           $ renderSearch
             <=> ( withVScrollBars OnRight $
-                    renderList renderSubreddit showSubreddit subreddits
+                    renderList renderSubreddit _showSubreddit _subreddits
                 )
       else emptyWidget
 
   renderSubreddit _ Subreddit{..} = txt $ "/r/" <> displayName
 
-  renderSearch = renderEditor (txt . T.unlines) focusSubredditSearch searchSubreddit
+  renderSearch = renderEditor (txt . T.unlines) _focusSubredditSearch _searchSubreddit
 
   postList =
     joinBorders . borderWithLabel (txt "Posts") $
       topBar
-        <=> (withVScrollBars OnRight $ renderList renderPost (not showSubreddit) posts)
+        <=> (withVScrollBars OnRight $ renderList renderPost (not _showSubreddit) _posts)
 
   renderPost _ Post{..} =
     hBox
@@ -162,8 +163,8 @@ drawUi AppState{..} = [keybindingHelp, subredditList, postPreview, postList]
       ]
 
   postPreview =
-    if showPost
-      then case listSelectedElement posts of
+    if _showPost
+      then case listSelectedElement _posts of
         Just (_, p) ->
           centerLayer
             . hLimit 80
@@ -182,7 +183,7 @@ drawUi AppState{..} = [keybindingHelp, subredditList, postPreview, postList]
           hBox
             [ str "created on "
             , attrName "time"
-                `withAttr` (str . iso8601Show . utcToLocalTime tz) (posixSecondsToUTCTime created)
+                `withAttr` (str . iso8601Show . utcToLocalTime _tz) (posixSecondsToUTCTime created)
             , str " by "
             , attrName "author" `withAttr` txt author
             ]
@@ -191,7 +192,7 @@ drawUi AppState{..} = [keybindingHelp, subredditList, postPreview, postList]
       , comments
       ]
 
-  comments = vBox . Vec.toList $ Vec.map renderComment postComments
+  comments = vBox . Vec.toList $ Vec.map renderComment _postComments
 
   renderComment (Mr _) = txt "more ..."
   renderComment (Cmt Comment{replies = Listing{children}, ..}) =
@@ -217,152 +218,126 @@ drawUi AppState{..} = [keybindingHelp, subredditList, postPreview, postList]
   topBar =
     (withAttr (attrName "title") $ txt "Reddit")
       <+> ( padLeft Max . padRight (Pad 1) . hBox $
-              [ maybe emptyWidget renderUser user
+              [ maybe emptyWidget renderUser _user
               ]
           )
 
   keybindingHelp =
-    if showHelp
+    if _showHelp
       then
         centerLayer . borderWithLabel (txt "Help") . padAll 1 $
-          keybindingHelpWidget keyConfig handlers
+          keybindingHelpWidget _keyConfig handlers
       else emptyWidget
 
 appEvent :: BrickEvent Name CustomEvent -> EventM Name AppState ()
 appEvent be@(VtyEvent e@(EvKey k mods)) = do
   AppState{..} <- get
 
-  when (not showSubreddit && not showPost) $ do
-    nl <- nestEventM' posts (handleListEventVi handleListEvent e)
-    let total = Vec.length . listElements $ nl
-    let isLast = case listSelected nl of
-          Nothing -> True
-          Just n -> n == total - 1
-    modify $ \st -> st{posts = nl}
+  when (not _showSubreddit && not _showPost) $ do
+    zoom posts (handleListEventVi handleListEvent e)
+    total <- Vec.length <$> use (posts . listElementsL)
+    isLast <- maybe True (== (total - 1)) <$> use (posts . listSelectedL)
     when
       isLast
-      (void . liftIO $ writeBChanNonBlocking bchan GetMorePosts)
+      (void . liftIO $ writeBChanNonBlocking _bchan GetMorePosts)
 
-  when showPost $ do
+  when _showPost $ do
     handleViewportEventVi handleViewportEvent PostName e
 
-  when showSubreddit $ do
-    if focusSubredditSearch
+  when _showSubreddit $ do
+    if _focusSubredditSearch
       then do
-        ne <- nestEventM' searchSubreddit (handleEditorEvent be)
-        modify $ \st -> st{searchSubreddit = ne}
+        zoom searchSubreddit (handleEditorEvent be)
         case e of
           EvKey KEnter [] -> do
             let sr =
                   Subreddit "" "" $
-                    "/r/" <> (T.strip . T.unlines) (getEditContents searchSubreddit) <> "/"
-            modify $ \st@AppState{searchSubreddit = ne'} ->
+                    "/r/" <> (T.strip . T.unlines) (getEditContents _searchSubreddit) <> "/"
+            modify $ \st@AppState{_searchSubreddit = ne'} ->
               st
-                { currentSubreddit = sr
-                , focusSubredditSearch = False
-                , showSubreddit = False
-                , searchSubreddit = applyEdit clearZipper ne'
+                { _currentSubreddit = sr
+                , _focusSubredditSearch = False
+                , _showSubreddit = False
+                , _searchSubreddit = applyEdit clearZipper ne'
                 }
-            liftIO $ writeBChan bchan GetPosts
+            liftIO $ writeBChan _bchan GetPosts
           _ -> return ()
       else do
-        nl <- nestEventM' subreddits (handleListEventVi handleListEvent e)
-        modify $ \st -> st{subreddits = nl}
+        zoom subreddits (handleListEventVi handleListEvent e)
         case e of
           EvKey KEnter [] -> do
+            nl <- use subreddits
             case listSelectedElement nl of
               Just (_, sr) -> do
-                modify $ \st -> st{currentSubreddit = sr, showSubreddit = False}
-                liftIO $ writeBChan bchan GetPosts
+                currentSubreddit .= sr
+                showSubreddit .= False
+                liftIO $ writeBChan _bchan GetPosts
               Nothing -> return ()
           _ -> return ()
     case e of
       EvKey (KChar '/') [] -> do
-        modify $ \st -> st{focusSubredditSearch = True}
+        focusSubredditSearch .= True
       EvKey (KEsc) [] -> do
-        when focusSubredditSearch $ modify $ \st -> st{focusSubredditSearch = False}
+        focusSubredditSearch .= False
       _ -> return ()
 
   case e of
     EvKey (KChar 'c') [MCtrl] -> halt
     _ -> return ()
-  unless focusSubredditSearch $ do
-    void $ handleKey dispatcher k mods
+  unless _focusSubredditSearch $ do
+    void $ handleKey _dispatcher k mods
 appEvent (AppEvent GetPosts) = do
-  AppState{currentSubreddit = Subreddit{..}, ..} <- get
+  AppState{_currentSubreddit = Subreddit{..}, ..} <- get
   void . liftIO . forkIO $ do
-    _ <- atomically $ takeTMVar after
+    _ <- atomically $ takeTMVar _after
     Listing{children, after = after''} :: Listing Post <-
       getEndpoint
-        accessToken
+        _accessToken
         url
         [("limit", Just "100")]
         `catch` \(_ :: JSONException) -> return mempty
-    writeBChan bchan $ Posts children
-    atomically $ putTMVar after after''
+    writeBChan _bchan $ Posts children
+    atomically $ putTMVar _after after''
 appEvent (AppEvent (Posts children)) = do
-  modify $ \st@AppState{..} ->
-    st
-      { posts =
-          listReplace
-            children
-            (Just 0)
-            posts
-      }
+  posts %= \ps -> listReplace children (Just 0) ps
 appEvent (AppEvent GetMorePosts) = do
-  AppState{currentSubreddit = Subreddit{..}, ..} <- get
+  AppState{_currentSubreddit = Subreddit{..}, ..} <- get
 
   void . liftIO . forkIO $ do
-    after' <- atomically $ takeTMVar after
+    after' <- atomically $ takeTMVar _after
     Listing{children, after = after''} :: Listing Post <-
       getEndpoint
-        accessToken
+        _accessToken
         url
         [("limit", Just "100"), ("after", encodeUtf8 <$> after')]
-    writeBChan bchan $ MorePosts children
-    atomically $ putTMVar after after''
+    writeBChan _bchan $ MorePosts children
+    atomically $ putTMVar _after after''
 appEvent (AppEvent (MorePosts children)) = do
-  st@AppState{..} <- get
-  put
-    st
-      { posts =
-          listReplace
-            (listElements posts <> children)
-            (listSelected posts <|> Just 0)
-            posts
-      }
+  posts %= \ps -> listReplace (listElements ps <> children) (listSelected ps <|> Just 0) ps
 appEvent (AppEvent GetSubreddits) = do
   AppState{..} <- get
   void . liftIO . forkIO $ do
-    srs <- Vec.modify VA.sort <$> getSubreddits accessToken
-    writeBChan bchan (Subreddits srs)
+    srs <- Vec.modify VA.sort <$> getSubreddits _accessToken
+    writeBChan _bchan (Subreddits srs)
 appEvent (AppEvent (Subreddits srs)) = do
-  modify $ \st@AppState{..} ->
-    st
-      { subreddits =
-          listReplace
-            (listElements subreddits <> srs)
-            (listSelected subreddits <|> Just 0)
-            subreddits
-      }
+  subreddits %= \srs' -> listReplace (listElements srs' <> srs) (listSelected srs' <|> Just 0) srs'
 appEvent (AppEvent GetUserData) = do
   AppState{..} <- get
   void . liftIO . forkIO $ do
-    u <- getEndpoint accessToken "/api/v1/me" []
-    writeBChan bchan (UserData u)
-appEvent (AppEvent (UserData u)) = do
-  modify $ \st -> st{user = Just u}
+    u <- getEndpoint _accessToken "/api/v1/me" []
+    writeBChan _bchan (UserData u)
+appEvent (AppEvent (UserData u)) = user ?= u
 appEvent (AppEvent (GetPostComment pid)) = do
   AppState{..} <- get
   void . liftIO . forkIO $ do
     (_, Listing{children}) :: (Listing Post, Listing CommentOrMore) <-
       getEndpoint
-        accessToken
+        _accessToken
         ("/comments/" <> pid)
-        [("depth", Just "3"), ("limit", Just "1000")]
-    writeBChan bchan (PostComments children)
+        [("depth", Just "3"), ("limit", Just "500")]
+    writeBChan _bchan (PostComments children)
 appEvent (AppEvent (PostComments cmts)) = do
-  modify $ \st -> st{postComments = cmts}
+  postComments .= cmts
 appEvent _ = return ()
 
 defaultBindings :: [(KeyEvent, [Binding])]
@@ -393,27 +368,27 @@ handlers =
   , onEvent
       ShowHelpEvent
       "Show help"
-      (modify $ \st@AppState{showHelp} -> st{showHelp = not showHelp})
+      (showHelp %= not)
   , onEvent
       ShowSubredditEvent
       "Show subreddits"
-      (modify $ \st@AppState{..} -> st{showSubreddit = not showSubreddit})
+      (showSubreddit %= not)
   , onEvent
       RefreshEvent
       "Refresh data"
       $ do
         AppState{..} <- get
         liftIO $ do
-          writeBChan bchan GetUserData
-          writeBChan bchan GetPosts
-          writeBChan bchan GetSubreddits
+          writeBChan _bchan GetUserData
+          writeBChan _bchan GetPosts
+          writeBChan _bchan GetSubreddits
   , onEvent
       OpenPostUrlEvent
       "Open post in browser"
       $ do
         AppState{..} <- get
-        when (not showSubreddit) $ do
-          case listSelectedElement posts of
+        when (not _showSubreddit) $ do
+          case listSelectedElement _posts of
             Just (_, Post{..}) -> do
               liftIO $ openInBrowser url
             Nothing -> return ()
@@ -422,23 +397,22 @@ handlers =
       "Open post comments in browser"
       $ do
         AppState{..} <- get
-        when (not showSubreddit) $ do
-          case listSelectedElement posts of
+        when (not _showSubreddit) $ do
+          case listSelectedElement _posts of
             Just (_, Post{..}) -> do
               liftIO $ openInBrowser ("https://old.reddit.com" <> permalink)
             Nothing -> return ()
   , onEvent OpenPostEvent "Open post" $ do
       AppState{..} <- get
-      when (not showSubreddit) $ do
-        modify $ \st -> st{showPost = not showPost}
-      if (not showPost)
+      when (not _showSubreddit) $ showPost %= not
+      if (not _showPost)
         then do
-          case listSelectedElement posts of
+          case listSelectedElement _posts of
             Just (_, Post{..}) ->
-              liftIO $ writeBChan bchan (GetPostComment postId)
+              liftIO $ writeBChan _bchan (GetPostComment postId)
             _ -> return ()
         else do
-          modify $ \st -> st{postComments = mempty}
+          postComments .= mempty
   ]
 
 handleViewportEvent :: n -> Event -> EventM n s ()

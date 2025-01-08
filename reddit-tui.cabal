@@ -98,7 +98,7 @@ executable reddit-tui
                       vector,
                       vector-algorithms,
                       process,
-                      microlens
+                      microlens-platform
 
     -- Directories containing source files.
     hs-source-dirs:   app
