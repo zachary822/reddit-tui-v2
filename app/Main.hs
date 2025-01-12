@@ -266,9 +266,8 @@ appEvent be@(VtyEvent e@(EvKey k mods)) = do
         zoom subreddits (handleListEventVi handleListEvent e)
         case e of
           EvKey KEnter [] -> do
-            nl <- use subreddits
-            case listSelectedElement nl of
-              Just (_, sr) -> do
+            preuse (subreddits . listSelectedElementL) >>= \case
+              Just sr -> do
                 currentSubreddit .= sr
                 showSubreddit .= False
                 liftIO $ writeBChan _bchan GetPosts
@@ -386,10 +385,10 @@ handlers =
       OpenPostUrlEvent
       "Open post in browser"
       $ do
-        AppState{..} <- get
+        st@AppState{..} <- get
         when (not _showSubreddit) $ do
-          case listSelectedElement _posts of
-            Just (_, Post{..}) -> do
+          case st ^? posts . listSelectedElementL of
+            Just Post{..} -> do
               liftIO $ openInBrowser url
             Nothing -> return ()
   , onEvent
@@ -403,12 +402,12 @@ handlers =
               liftIO $ openInBrowser ("https://old.reddit.com" <> permalink)
             Nothing -> return ()
   , onEvent OpenPostEvent "Open post" $ do
-      AppState{..} <- get
+      st@AppState{..} <- get
       when (not _showSubreddit) $ showPost %= not
       if (not _showPost)
         then do
-          case listSelectedElement _posts of
-            Just (_, Post{..}) ->
+          case st ^? posts . listSelectedElementL of
+            Just Post{..} ->
               liftIO $ writeBChan _bchan (GetPostComment postId)
             _ -> return ()
         else do
